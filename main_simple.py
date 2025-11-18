@@ -14,10 +14,12 @@ from datetime import datetime
 
 # Importar permissões do Android
 try:
-    from android.permissions import request_permissions, Permission
+    from android.permissions import request_permissions, Permission, check_permission
+    from android.runnable import run_on_ui_thread
     ANDROID = True
 except ImportError:
     ANDROID = False
+    Permission = None
 
 
 class SimplePotholeApp(BoxLayout):
@@ -67,22 +69,49 @@ class SimplePotholeApp(BoxLayout):
         
         # Solicitar permissões no Android
         if ANDROID:
-            request_permissions([Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE], self.on_permissions_result)
+            Clock.schedule_once(self.request_android_permissions, 0.5)
         else:
             # Desktop - iniciar câmera diretamente
-            self.init_camera()
+            Clock.schedule_once(lambda dt: self.init_camera(), 0.5)
         
         # Atualiza timestamp
         Clock.schedule_interval(self.update_time, 1.0)
     
+    def request_android_permissions(self, dt):
+        """Solicita permissões do Android"""
+        if ANDROID:
+            # Verifica se já tem permissão
+            if check_permission(Permission.CAMERA):
+                self.init_camera()
+                self.info_label.text = 'Câmera ativa - Aguardando detecção...'
+            else:
+                # Solicita permissões
+                request_permissions(
+                    [Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE],
+                    self.on_permissions_result
+                )
+    
     def on_permissions_result(self, permissions, grant_results):
         """Callback quando permissões são concedidas/negadas"""
-        if all(grant_results):
-            self.init_camera()
-            self.info_label.text = 'Permissões concedidas - Câmera ativa'
-        else:
-            self.camera.text = '❌ Permissão de câmera negada!\nPor favor, habilite nas configurações do app.'
-            self.info_label.text = 'Sem permissões - Funcionalidade limitada'
+        try:
+            # Verifica se a permissão de câmera foi concedida
+            camera_granted = False
+            if isinstance(grant_results, (list, tuple)):
+                camera_granted = any(grant_results)
+            else:
+                camera_granted = bool(grant_results)
+            
+            if camera_granted and ANDROID and check_permission(Permission.CAMERA):
+                Clock.schedule_once(lambda dt: self.init_camera(), 0.1)
+                self.info_label.text = 'Permissões concedidas - Inicializando câmera...'
+            else:
+                # Remove widget de câmera placeholder
+                if hasattr(self.camera, 'text'):
+                    self.camera.text = '❌ Permissão de câmera negada!\n\nPara usar o detector:\n1. Vá em Configurações do Android\n2. Apps > Detector de Buracos\n3. Permissões > Câmera\n4. Permitir'
+                self.info_label.text = 'Sem permissões - Funcionalidade limitada'
+        except Exception as e:
+            print(f"Erro no callback de permissões: {e}")
+            self.camera.text = f'Erro ao processar permissões: {e}'
     
     def init_camera(self):
         """Inicializa a câmera após permissões concedidas"""
@@ -108,7 +137,9 @@ class SimplePotholeApp(BoxLayout):
     def update_time(self, dt):
         """Atualiza timestamp"""
         current_time = datetime.now().strftime('%H:%M:%S')
-        self.info_label.text = f'Sistema ativo - {current_time}'
+        # Só atualiza se não estiver aguardando permissões
+        if 'permissões' not in self.info_label.text.lower():
+            self.info_label.text = f'Sistema ativo - {current_time}'
     
     def simulate_detection(self, instance):
         """Simula uma detecção de buraco"""
