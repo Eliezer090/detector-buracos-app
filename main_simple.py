@@ -12,6 +12,13 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle
 from datetime import datetime
 
+# Importar permissões do Android
+try:
+    from android.permissions import request_permissions, Permission
+    ANDROID = True
+except ImportError:
+    ANDROID = False
+
 
 class SimplePotholeApp(BoxLayout):
     """Interface simplificada para teste"""
@@ -28,19 +35,16 @@ class SimplePotholeApp(BoxLayout):
             color=(0, 1, 0, 1)
         )
         
-        # Câmera
-        try:
-            self.camera = Camera(
-                resolution=(640, 480),
-                play=True,
-                index=0
-            )
-        except Exception as e:
-            self.camera = Label(text=f'Erro ao acessar câmera: {e}')
+        # Placeholder para câmera (será iniciada após permissões)
+        self.camera = Label(
+            text='Solicitando permissão da câmera...',
+            size_hint=(1, 0.65),
+            font_size='18sp'
+        )
         
         # Info label
         self.info_label = Label(
-            text='Câmera ativa - Aguardando detecção...',
+            text='Aguardando permissões...',
             size_hint=(1, 0.1),
             font_size='16sp'
         )
@@ -61,8 +65,45 @@ class SimplePotholeApp(BoxLayout):
         # Contador
         self.detection_count = 0
         
+        # Solicitar permissões no Android
+        if ANDROID:
+            request_permissions([Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE], self.on_permissions_result)
+        else:
+            # Desktop - iniciar câmera diretamente
+            self.init_camera()
+        
         # Atualiza timestamp
         Clock.schedule_interval(self.update_time, 1.0)
+    
+    def on_permissions_result(self, permissions, grant_results):
+        """Callback quando permissões são concedidas/negadas"""
+        if all(grant_results):
+            self.init_camera()
+            self.info_label.text = 'Permissões concedidas - Câmera ativa'
+        else:
+            self.camera.text = '❌ Permissão de câmera negada!\nPor favor, habilite nas configurações do app.'
+            self.info_label.text = 'Sem permissões - Funcionalidade limitada'
+    
+    def init_camera(self):
+        """Inicializa a câmera após permissões concedidas"""
+        try:
+            # Remove o label placeholder
+            self.remove_widget(self.camera)
+            
+            # Cria câmera
+            self.camera = Camera(
+                resolution=(640, 480),
+                play=True,
+                index=0  # 0 = câmera traseira
+            )
+            
+            # Adiciona na posição correta (após status_label)
+            self.add_widget(self.camera, index=len(self.children) - 1)
+            self.info_label.text = 'Câmera ativa - Aguardando detecção...'
+            
+        except Exception as e:
+            self.camera = Label(text=f'Erro ao acessar câmera: {e}')
+            self.add_widget(self.camera, index=len(self.children) - 1)
     
     def update_time(self, dt):
         """Atualiza timestamp"""
