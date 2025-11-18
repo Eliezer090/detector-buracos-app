@@ -13,10 +13,10 @@ jobs:
     
     steps:
     - name: Checkout código
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Setup Python 3.10
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     
@@ -29,7 +29,7 @@ jobs:
         sudo apt install -y libncurses-dev cmake
     
     - name: Cache Buildozer
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .buildozer
@@ -65,7 +65,7 @@ jobs:
         ls -lh bin/
     
     - name: Upload APK
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: pothole-detector-apk-debug
         path: bin/*.apk
@@ -73,7 +73,7 @@ jobs:
     
     - name: Upload logs em caso de erro
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: buildozer-logs
         path: |
