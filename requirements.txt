@@ -2,20 +2,12 @@
 
 # Framework mobile
 kivy==2.2.1
-kivymd==1.1.1
 
-# Visão computacional e AI
+# Visão computacional e processamento
 opencv-python==4.8.1.78
 numpy==1.24.3
+pillow==10.0.1
 
-# YOLO (opcional - para modelo AI avançado)
-torch==2.1.0
-torchvision==0.16.0
-ultralytics==8.0.200
-
-# Build Android
+# Ferramentas de build (apenas para desenvolvimento)
 buildozer==1.5.0
 cython==3.0.5
-
-# Permissões Android
-android-permissions==0.1

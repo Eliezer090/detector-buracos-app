@@ -7,9 +7,14 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     
     steps:
     - name: Checkout código
@@ -23,10 +28,15 @@ jobs:
     - name: Instalar dependências do sistema
       run: |
         sudo apt update
-        sudo apt install -y git zip unzip openjdk-17-jdk wget
-        sudo apt install -y build-essential libssl-dev libffi-dev
-        sudo apt install -y autoconf libtool pkg-config zlib1g-dev
-        sudo apt install -y libncurses-dev cmake libltdl-dev
+        sudo apt install -y git zip unzip openjdk-17-jdk wget python3.10-venv
+        sudo apt install -y build-essential libssl-dev libffi-dev libltdl-dev
+        sudo apt install -y autoconf automake libtool pkg-config zlib1g-dev
+        sudo apt install -y libncurses-dev cmake
+        sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+        sudo apt install -y libjpeg-dev libpng-dev libfreetype6-dev
+        sudo apt install -y libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+        sudo apt install -y libgl1-mesa-dev libgles2-mesa-dev
+        sudo apt install -y libmtdev-dev libusb-1.0-0-dev libudev-dev
     
     - name: Cache Buildozer
       uses: actions/cache@v4
@@ -38,23 +48,25 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-buildozer-
     
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
     - name: Instalar Buildozer
       run: |
         pip install --upgrade pip setuptools wheel
         pip install buildozer==1.5.0
         pip install cython==0.29.33
-    
-    - name: Preparar build (versão simplificada)
+
+    - name: Mostrar versões
       run: |
-        # Backup do main.py original
-        if [ -f main.py ]; then
-          cp main.py main_full.py
-        fi
-        
-        # Usar versão simplificada para primeiro build
-        if [ -f main_simple.py ]; then
-          cp main_simple.py main.py
-        fi
+        python --version
+        pip --version
+        buildozer --version
     
     - name: Build APK Debug
       run: |
