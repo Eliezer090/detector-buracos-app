@@ -28,7 +28,7 @@ jobs:
     - name: Instalar dependências do sistema
       run: |
         sudo apt update
-        sudo apt install -y git zip unzip openjdk-17-jdk wget python3.10-venv
+        sudo apt install -y git zip unzip openjdk-17-jdk wget python3-venv
         sudo apt install -y build-essential libssl-dev libffi-dev libltdl-dev
         sudo apt install -y autoconf automake libtool pkg-config zlib1g-dev
         sudo apt install -y libncurses-dev cmake
