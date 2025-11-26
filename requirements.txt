@@ -1,13 +1,14 @@
-# Dependências do Aplicativo de Detecção de Buracos
+# Dependências para desenvolvimento local
+# O buildozer.spec define as dependências para Android
 
-# Framework mobile
-kivy==2.2.1
+# Kivy e dependências
+kivy[base]==2.3.0
+kivymd>=1.1.1
 
-# Visão computacional e processamento
-opencv-python==4.8.1.78
-numpy==1.24.3
-pillow==10.0.1
+# Processamento de imagem
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
 
-# Ferramentas de build (apenas para desenvolvimento)
-buildozer==1.5.0
-cython==3.0.5
+# Apenas para desenvolvimento/testes locais
+pytest>=7.0.0

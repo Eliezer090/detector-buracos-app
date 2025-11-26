@@ -1,175 +1,161 @@
 """
-Módulo de detecção de buracos usando AI
-Utiliza YOLOv5 ou detecção baseada em características visuais
+Detector de Buracos com OpenCV
+==============================
+Usa processamento de imagem para detectar potenciais buracos na pista.
 """
 
+from typing import List, Tuple
 import cv2
 import numpy as np
-from typing import List, Tuple
-import os
 
 
 class PotholeDetector:
-    """Detector de buracos na pista usando visão computacional e AI"""
-    
-    def __init__(self, use_yolo=False, model_path=None):
+    """Detector de buracos baseado em análise de imagem."""
+
+    def __init__(self, min_confidence: float = 0.45):
         """
-        Inicializa o detector
-        
         Args:
-            use_yolo: Se True, tenta usar modelo YOLO treinado
-            model_path: Caminho para modelo customizado
+            min_confidence: Confiança mínima para considerar uma detecção válida.
         """
-        self.use_yolo = use_yolo
-        self.model = None
-        self.confidence_threshold = 0.5
+        self.min_confidence = min_confidence
         
-        if use_yolo and model_path and os.path.exists(model_path):
-            self.load_yolo_model(model_path)
-        else:
-            # Fallback para detecção baseada em características
-            print("Usando detecção baseada em características visuais")
-    
-    def load_yolo_model(self, model_path):
-        """Carrega modelo YOLO treinado"""
-        try:
-            import torch
-            # Carrega modelo YOLOv5 customizado ou pré-treinado
-            self.model = torch.hub.load('ultralytics/yolov5', 'custom', 
-                                        path=model_path, force_reload=False)
-            self.model.conf = self.confidence_threshold
-            print(f"Modelo YOLO carregado: {model_path}")
-        except Exception as e:
-            print(f"Erro ao carregar modelo YOLO: {e}")
-            self.use_yolo = False
-    
+        # Parâmetros de detecção
+        self.min_area_ratio = 0.002   # Área mínima relativa ao frame
+        self.max_area_ratio = 0.25    # Área máxima relativa ao frame
+        
+        # ROI: região de interesse (metade inferior da imagem = pista)
+        self.roi_y_start = 0.4        # Começa em 40% da altura
+
     def detect(self, frame: np.ndarray) -> List[Tuple[float, float, float, float, float]]:
         """
-        Detecta buracos no frame
-        
+        Detecta buracos no frame.
+
         Args:
-            frame: Imagem em formato numpy array (BGR)
-            
+            frame: Imagem BGR do OpenCV
+
         Returns:
-            Lista de detecções: [(x, y, w, h, confidence), ...]
-            onde x, y, w, h são normalizados entre 0 e 1
+            Lista de detecções: [(x_norm, y_norm, w_norm, h_norm, confidence), ...]
+            Coordenadas normalizadas (0-1)
         """
-        if self.use_yolo and self.model is not None:
-            return self.detect_with_yolo(frame)
-        else:
-            return self.detect_with_features(frame)
-    
-    def detect_with_yolo(self, frame: np.ndarray) -> List[Tuple[float, float, float, float, float]]:
-        """Detecta buracos usando modelo YOLO"""
-        try:
-            # Inferência
-            results = self.model(frame)
-            detections = []
-            
-            # Processa resultados
-            for *box, conf, cls in results.xyxy[0]:
-                x1, y1, x2, y2 = box
-                h, w = frame.shape[:2]
-                
-                # Normaliza coordenadas
-                x_norm = float(x1) / w
-                y_norm = float(y1) / h
-                w_norm = float(x2 - x1) / w
-                h_norm = float(y2 - y1) / h
-                
-                detections.append((x_norm, y_norm, w_norm, h_norm, float(conf)))
-            
-            return detections
-        except Exception as e:
-            print(f"Erro na detecção YOLO: {e}")
+        if frame is None or frame.size == 0:
             return []
-    
-    def detect_with_features(self, frame: np.ndarray) -> List[Tuple[float, float, float, float, float]]:
-        """
-        Detecta buracos usando características visuais
-        Buracos geralmente aparecem como regiões escuras, irregulares e com bordas definidas
-        """
-        detections = []
-        
+
         try:
-            h, w = frame.shape[:2]
+            height, width = frame.shape[:2]
+            
+            # Extrai ROI (região inferior = pista)
+            roi_y = int(height * self.roi_y_start)
+            roi = frame[roi_y:, :]
+            roi_height = height - roi_y
             
             # Pré-processamento
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            
+            # Equalização de histograma para melhorar contraste
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+            
+            # Blur para reduzir ruído
+            blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
             
             # Detecção de bordas
             edges = cv2.Canny(blurred, 50, 150)
             
-            # Operações morfológicas para conectar bordas
+            # Operações morfológicas
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-            dilated = cv2.dilate(closed, kernel, iterations=2)
+            closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+            dilated = cv2.dilate(closed, kernel, iterations=1)
             
             # Encontra contornos
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours, _ = cv2.findContours(
+                dilated, 
+                cv2.RETR_EXTERNAL, 
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+            
+            detections = []
+            frame_area = width * roi_height
+            min_area = frame_area * self.min_area_ratio
+            max_area = frame_area * self.max_area_ratio
             
             for contour in contours:
                 area = cv2.contourArea(contour)
                 
-                # Filtra por área mínima (ajustar conforme necessário)
-                if area < 500 or area > 50000:
+                if area < min_area or area > max_area:
                     continue
                 
-                # Calcula retângulo delimitador
-                x, y, w_box, h_box = cv2.boundingRect(contour)
+                # Bounding box
+                x, y, w, h = cv2.boundingRect(contour)
                 
-                # Calcula razão de aspecto
-                aspect_ratio = float(w_box) / h_box if h_box > 0 else 0
+                # Análise de forma
+                confidence = self._analyze_contour(contour, area, w, h, gray[y:y+h, x:x+w])
                 
-                # Filtra por razão de aspecto (buracos tendem a ser circulares/ovais)
-                if aspect_ratio < 0.3 or aspect_ratio > 3.0:
-                    continue
-                
-                # Calcula circularidade
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter == 0:
-                    continue
-                circularity = 4 * np.pi * area / (perimeter * perimeter)
-                
-                # Verifica intensidade (buracos são geralmente escuros)
-                roi = gray[y:y+h_box, x:x+w_box]
-                if roi.size == 0:
-                    continue
-                mean_intensity = np.mean(roi)
-                
-                # Calcula confiança baseada em múltiplos fatores
-                confidence = 0.0
-                
-                # Buracos são geralmente escuros
-                if mean_intensity < 100:
-                    confidence += 0.3
-                
-                # Boa circularidade indica possível buraco
-                if circularity > 0.4:
-                    confidence += 0.4
-                
-                # Razão de aspecto próxima de 1 (circular)
-                if 0.7 <= aspect_ratio <= 1.3:
-                    confidence += 0.3
-                
-                # Apenas adiciona se confiança é suficiente
-                if confidence >= self.confidence_threshold:
-                    # Normaliza coordenadas
-                    x_norm = x / w
-                    y_norm = y / h
-                    w_norm = w_box / w
-                    h_norm = h_box / h
+                if confidence >= self.min_confidence:
+                    # Converte para coordenadas normalizadas do frame completo
+                    x_norm = x / width
+                    y_norm = (y + roi_y) / height
+                    w_norm = w / width
+                    h_norm = h / height
                     
                     detections.append((x_norm, y_norm, w_norm, h_norm, confidence))
             
+            # Ordena por confiança e retorna top 5
+            detections.sort(key=lambda d: d[4], reverse=True)
+            return detections[:5]
+
         except Exception as e:
-            print(f"Erro na detecção por características: {e}")
+            print(f"Erro na detecção: {e}")
+            return []
+
+    def _analyze_contour(
+        self, 
+        contour: np.ndarray, 
+        area: float, 
+        width: int, 
+        height: int,
+        roi_patch: np.ndarray
+    ) -> float:
+        """
+        Analisa um contorno e retorna uma pontuação de confiança.
         
-        return detections
-    
-    def set_confidence_threshold(self, threshold: float):
-        """Define threshold de confiança para detecções"""
-        self.confidence_threshold = max(0.0, min(1.0, threshold))
-        if self.model:
-            self.model.conf = self.confidence_threshold
+        Buracos tendem a ser:
+        - Escuros (baixa intensidade)
+        - Arredondados ou elípticos
+        - Com borda bem definida
+        """
+        scores = []
+        
+        # 1. Circularidade (buracos são geralmente arredondados)
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter > 0:
+            circularity = 4 * np.pi * area / (perimeter ** 2)
+            # Score: 1.0 para círculo perfeito, diminui para formas alongadas
+            circ_score = min(circularity, 1.0)
+            scores.append(circ_score * 0.25)
+        
+        # 2. Aspecto (não muito alongado)
+        aspect_ratio = max(width, height) / (min(width, height) + 1)
+        # Penaliza formas muito alongadas (não parecem buracos)
+        if aspect_ratio > 4:
+            aspect_score = 0.2
+        elif aspect_ratio > 2:
+            aspect_score = 0.5
+        else:
+            aspect_score = 1.0
+        scores.append(aspect_score * 0.2)
+        
+        # 3. Intensidade (buracos são escuros)
+        if roi_patch.size > 0:
+            mean_intensity = np.mean(roi_patch)
+            # Quanto mais escuro, maior o score
+            intensity_score = 1.0 - (mean_intensity / 255.0)
+            scores.append(intensity_score * 0.35)
+        
+        # 4. Contraste com vizinhança
+        if roi_patch.size > 0:
+            std_intensity = np.std(roi_patch)
+            # Buracos têm variação interna moderada
+            contrast_score = min(std_intensity / 50.0, 1.0)
+            scores.append(contrast_score * 0.2)
+        
+        return sum(scores)
