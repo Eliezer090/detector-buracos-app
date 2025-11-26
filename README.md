@@ -1,6 +1,6 @@
 # 🚗 Detector de Buracos - App Android
 
-Aplicativo Android que usa a câmera traseira do celular e processamento de imagem (IA) para detectar buracos na pista em tempo real enquanto você dirige.
+Aplicativo Android que usa a câmera traseira do celular e processamento de imagem (OpenCV) para detectar buracos na pista em tempo real enquanto você dirige.
 
 ## 📱 Funcionalidades
 
@@ -9,7 +9,8 @@ Aplicativo Android que usa a câmera traseira do celular e processamento de imag
 - ✅ **Vibração** quando detecta buraco
 - ✅ **Contador** de buracos detectados
 - ✅ **Modo paisagem** otimizado para painel do carro
-- ✅ **Baixo consumo** de bateria (8 FPS)
+- ✅ **10 FPS** de processamento (bom equilíbrio performance/bateria)
+- ✅ **NMS** (Non-Maximum Suppression) para evitar detecções duplicadas
 
 ## 🏗️ Estrutura do Projeto
 
@@ -28,17 +29,17 @@ AppViewBurracos/
 
 | Componente | Tecnologia |
 |------------|------------|
-| Framework | Python 3.10 + Kivy 2.3.0 |
-| Processamento de Imagem | OpenCV |
+| Framework | Python 3.10 + Kivy 2.2.0 |
+| Processamento de Imagem | OpenCV + NumPy |
 | Build Android | Buildozer + python-for-android |
-| CI/CD | GitHub Actions |
+| CI/CD | GitHub Actions (ubuntu-22.04) |
 
 ## 🚀 Build
 
 ### Automático (GitHub Actions)
 
 1. Faça push para branch `main` ou `master`
-2. O workflow `.github/workflows/build.yml` será executado
+2. O workflow `.github/workflows/build.yml` será executado (~40-60 min)
 3. Baixe o APK na aba "Actions" → "Artifacts"
 
 ### Manual (Local)
@@ -58,24 +59,32 @@ buildozer android debug
 - **Android**: API 24+ (Android 7.0+)
 - **Permissões**: Câmera, Vibração
 
-## 🎯 Como Funciona
+## 🎯 Como Funciona o Detector
 
-1. **Captura**: A câmera traseira captura frames a 8 FPS
-2. **ROI**: Analisa apenas a metade inferior da imagem (região da pista)
-3. **Pré-processamento**: 
-   - Conversão para escala de cinza
-   - Equalização de histograma (CLAHE)
-   - Gaussian blur
-4. **Detecção**: 
-   - Detecção de bordas (Canny)
-   - Operações morfológicas
-   - Análise de contornos
-5. **Classificação**: Cada contorno é analisado por:
-   - Circularidade (buracos são arredondados)
-   - Proporção (não muito alongados)
-   - Intensidade (buracos são escuros)
-   - Contraste local
-6. **Alerta**: Se confiança > 45%, vibra e mostra overlay
+### Pipeline de Processamento
+
+1. **Captura**: Câmera traseira a 10 FPS
+2. **ROI**: Região de interesse (65% inferior = pista)
+3. **Redimensionamento**: Max 640px largura para performance
+4. **Pré-processamento**: 
+   - Escala de cinza
+   - CLAHE (equalização adaptativa)
+   - Filtro bilateral (preserva bordas)
+5. **Detecção de Bordas**: Canny com thresholds adaptativos
+6. **Morfologia**: Close + Dilate para conectar regiões
+
+### Scoring Multi-Critério (Confiança)
+
+| Critério | Peso | Descrição |
+|----------|------|-----------|
+| Circularidade | 25% | Buracos são arredondados |
+| Proporção | 15% | Não muito alongados |
+| Intensidade | 30% | Buracos são escuros |
+| Contraste | 20% | Borda bem definida |
+| Convexidade | 10% | Forma convexa |
+
+7. **NMS**: Remove detecções sobrepostas (IoU > 0.3)
+8. **Alerta**: Se confiança ≥ 40%, vibra e mostra overlay
 
 ## 📝 Licença
 
