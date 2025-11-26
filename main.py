@@ -278,7 +278,7 @@ class PotholeDetectorLayout(BoxLayout):
             from detector import PotholeDetector
             self.detector = PotholeDetector()
             Logger.info("App: Detector inicializado com sucesso")
-            self._log(f"Detector carregado: {type(self.detector.active_detector).__name__}", "OK")
+            self._log(f"Detector carregado: {self.detector.detector_name}", "OK")
         except Exception as e:
             Logger.error(f"App: Erro ao inicializar detector: {e}")
             self._update_status(f"Erro: {e}", error=True)

@@ -74,6 +74,18 @@ class PotholeDetector:
             return []
 
     @property
+    def active_detector(self):
+        """Retorna o detector ativo."""
+        return self._detector
+
+    @property
+    def detector_name(self) -> str:
+        """Retorna o nome do detector ativo."""
+        if self._detector is None:
+            return "Nenhum"
+        return type(self._detector).__name__
+
+    @property
     def is_yolo_available(self) -> bool:
         """Verifica se está usando YOLO."""
         try:
