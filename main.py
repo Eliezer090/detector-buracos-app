@@ -7,6 +7,7 @@ Usa câmera traseira + IA para detectar buracos na pista em tempo real.
 import os
 from datetime import datetime
 from typing import List, Tuple
+from collections import deque
 
 # Kivy config DEVE vir antes de qualquer outro import do Kivy
 os.environ.setdefault('KIVY_LOG_LEVEL', 'info')
@@ -14,12 +15,14 @@ os.environ.setdefault('KIVY_LOG_LEVEL', 'info')
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Line, Rectangle
+from kivy.graphics import Color, Line, Rectangle, PushMatrix, PopMatrix, Rotate
+from kivy.graphics.texture import Texture
 from kivy.logger import Logger
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 from kivy.utils import platform
 
@@ -41,6 +44,58 @@ if IS_ANDROID:
 else:
     Permission = check_permission = request_permissions = None
     PythonActivity = Context = None
+
+
+class DebugPanel(ScrollView):
+    """Painel de debug com logs em tempo real."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (1, None)
+        self.height = 150
+        self.do_scroll_x = False
+        self.bar_width = 10
+        self.bar_color = (0.5, 0.5, 0.5, 0.8)
+        
+        self.log_label = Label(
+            text="[DEBUG] Painel de logs\n",
+            markup=True,
+            size_hint_y=None,
+            font_size="12sp",
+            halign="left",
+            valign="top",
+            color=(0.8, 1, 0.8, 1)
+        )
+        self.log_label.bind(texture_size=self._update_height)
+        self.log_label.bind(width=lambda *_: setattr(self.log_label, 'text_size', (self.log_label.width, None)))
+        
+        self.add_widget(self.log_label)
+        
+        # Histórico de logs (máximo 50 linhas)
+        self.log_history = deque(maxlen=50)
+        
+    def _update_height(self, *_):
+        self.log_label.height = max(self.log_label.texture_size[1], self.height)
+        # Auto-scroll para o final
+        self.scroll_y = 0
+        
+    def add_log(self, message: str, level: str = "INFO"):
+        """Adiciona uma linha de log."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        if level == "DETECT":
+            color = "[color=ff9900]"  # Laranja
+        elif level == "ALERT":
+            color = "[color=ff0000]"  # Vermelho
+        elif level == "OK":
+            color = "[color=00ff00]"  # Verde
+        else:
+            color = "[color=aaaaaa]"  # Cinza
+            
+        log_line = f"{color}[{timestamp}] {message}[/color]"
+        self.log_history.append(log_line)
+        
+        self.log_label.text = "\n".join(self.log_history)
 
 
 class AlertOverlay(Widget):
@@ -121,12 +176,17 @@ class PotholeDetectorLayout(BoxLayout):
         self.detection_count = 0
         self.last_alert_time = None
         self.alert_cooldown = 2.0
+        self.debug_enabled = False
+        self.frame_count = 0
+        self.last_fps_time = datetime.now()
+        self.current_fps = 0
 
         # UI Components
         self.status_label = Label(
             text="[b]Detector de Buracos[/b]\nIniciando...",
             markup=True,
-            size_hint=(1, 0.12),
+            size_hint=(1, None),
+            height=60,
             font_size="18sp",
             halign="center",
             valign="middle"
@@ -136,13 +196,14 @@ class PotholeDetectorLayout(BoxLayout):
 
         self.counter_label = Label(
             text="Buracos detectados: 0",
-            size_hint=(1, 0.08),
+            size_hint=(1, None),
+            height=30,
             font_size="16sp",
             color=(1, 1, 0, 1)
         )
 
         # Container para câmera
-        self.camera_container = FloatLayout(size_hint=(1, 0.7))
+        self.camera_container = FloatLayout(size_hint=(1, 1))
         self.camera_placeholder = Label(
             text="Aguardando permissão da câmera...",
             halign="center"
@@ -153,10 +214,26 @@ class PotholeDetectorLayout(BoxLayout):
         self.alert_overlay = AlertOverlay()
         self.camera_container.add_widget(self.alert_overlay)
 
-        # Botão de permissão
+        # Painel de Debug (inicialmente oculto)
+        self.debug_panel = DebugPanel()
+        self.debug_panel.opacity = 0
+        self.debug_panel.height = 0
+
+        # Botão de Debug
+        self.debug_btn = Button(
+            text="📊 Mostrar Debug",
+            size_hint=(0.5, None),
+            height=40,
+            background_color=(0.3, 0.3, 0.5, 1),
+            pos_hint={'center_x': 0.5}
+        )
+        self.debug_btn.bind(on_press=self._toggle_debug)
+
+        # Botão de permissão (inicialmente oculto)
         self.permission_btn = Button(
             text="Permitir Câmera",
-            size_hint=(1, 0.1),
+            size_hint=(1, None),
+            height=50,
             opacity=0,
             disabled=True
         )
@@ -165,11 +242,35 @@ class PotholeDetectorLayout(BoxLayout):
         # Montar layout
         self.add_widget(self.status_label)
         self.add_widget(self.counter_label)
+        self.add_widget(self.debug_btn)
+        self.add_widget(self.debug_panel)
         self.add_widget(self.camera_container)
         self.add_widget(self.permission_btn)
 
         # Inicialização
         Clock.schedule_once(self._initialize, 0.5)
+
+    def _toggle_debug(self, *_):
+        """Liga/desliga o painel de debug."""
+        self.debug_enabled = not self.debug_enabled
+        
+        if self.debug_enabled:
+            self.debug_panel.opacity = 1
+            self.debug_panel.height = 150
+            self.debug_btn.text = "📊 Ocultar Debug"
+            self.debug_btn.background_color = (0.5, 0.3, 0.3, 1)
+            self._log("Painel de debug ativado", "OK")
+            self._log(f"Detector: {type(self.detector).__name__ if self.detector else 'Não inicializado'}", "INFO")
+        else:
+            self.debug_panel.opacity = 0
+            self.debug_panel.height = 0
+            self.debug_btn.text = "📊 Mostrar Debug"
+            self.debug_btn.background_color = (0.3, 0.3, 0.5, 1)
+
+    def _log(self, message: str, level: str = "INFO"):
+        """Adiciona log ao painel de debug."""
+        if self.debug_enabled:
+            self.debug_panel.add_log(message, level)
 
     def _initialize(self, *_):
         """Inicializa detector e solicita permissões."""
@@ -177,9 +278,11 @@ class PotholeDetectorLayout(BoxLayout):
             from detector import PotholeDetector
             self.detector = PotholeDetector()
             Logger.info("App: Detector inicializado com sucesso")
+            self._log(f"Detector carregado: {type(self.detector.active_detector).__name__}", "OK")
         except Exception as e:
             Logger.error(f"App: Erro ao inicializar detector: {e}")
             self._update_status(f"Erro: {e}", error=True)
+            self._log(f"Erro ao carregar detector: {e}", "ALERT")
             return
 
         if IS_ANDROID:
@@ -221,19 +324,23 @@ class PotholeDetectorLayout(BoxLayout):
         self.permission_btn.opacity = 1
         self.permission_btn.disabled = False
         self._update_status("Permissão necessária", error=True)
+        self._log("Permissão de câmera negada", "ALERT")
 
     def _init_camera(self):
         """Inicializa a câmera."""
         self._update_status("Iniciando câmera...")
+        self._log("Inicializando câmera...", "INFO")
 
         try:
             from kivy.uix.camera import Camera
+            from kivy.uix.image import Image
             
             if self.camera_placeholder.parent:
                 self.camera_container.remove_widget(self.camera_placeholder)
 
+            # Usar câmera traseira (index=0 geralmente é traseira no Android)
             self.camera = Camera(
-                resolution=(1280, 720),
+                resolution=(720, 1280),  # Resolução em portrait
                 play=True,
                 index=0,
                 allow_stretch=True,
@@ -246,12 +353,15 @@ class PotholeDetectorLayout(BoxLayout):
             self.permission_btn.disabled = True
 
             self._update_status("Monitorando pista...")
+            self._log("Câmera iniciada com sucesso", "OK")
+            self._log(f"Resolução: 720x1280 (portrait)", "INFO")
             self._start_processing()
 
         except Exception as e:
             Logger.error(f"App: Erro ao iniciar câmera: {e}")
             self.camera_placeholder.text = f"Erro: {e}"
             self._update_status(f"Erro na câmera: {e}", error=True)
+            self._log(f"Erro na câmera: {e}", "ALERT")
 
     def _start_processing(self):
         """Inicia processamento de frames."""
@@ -260,12 +370,14 @@ class PotholeDetectorLayout(BoxLayout):
         # 10 FPS para boa detecção sem drenar bateria
         self.processing_event = Clock.schedule_interval(self._process_frame, 1/10)
         Logger.info("App: Processamento de frames iniciado (10 FPS)")
+        self._log("Processamento iniciado (10 FPS)", "OK")
 
     def _stop_processing(self):
         """Para processamento de frames."""
         if self.processing_event:
             self.processing_event.cancel()
             self.processing_event = None
+            self._log("Processamento parado", "INFO")
 
     def _process_frame(self, dt):
         """Processa um frame da câmera."""
@@ -276,14 +388,38 @@ class PotholeDetectorLayout(BoxLayout):
             import numpy as np
             import cv2
             
+            # Calcular FPS
+            self.frame_count += 1
+            now = datetime.now()
+            elapsed = (now - self.last_fps_time).total_seconds()
+            if elapsed >= 1.0:
+                self.current_fps = self.frame_count / elapsed
+                self.frame_count = 0
+                self.last_fps_time = now
+                if self.debug_enabled:
+                    self._log(f"FPS: {self.current_fps:.1f}", "INFO")
+            
             texture = self.camera.texture
             pixels = texture.pixels
             
             frame = np.frombuffer(pixels, dtype=np.uint8)
             frame = frame.reshape(texture.height, texture.width, 4)
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+            
+            # Corrigir orientação: rotacionar frame se necessário
+            # A câmera do Android geralmente vem em landscape, precisamos corrigir
+            if IS_ANDROID:
+                # Rotaciona 90 graus no sentido horário para portrait
+                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_CLOCKWISE)
 
             detections = self.detector.detect(frame_bgr)
+            
+            # Log de debug sobre detecção
+            if self.debug_enabled and self.frame_count % 10 == 0:  # Log a cada 10 frames
+                if detections:
+                    self._log(f"Detectando: {len(detections)} objeto(s)", "DETECT")
+                else:
+                    self._log("Analisando frame... nenhuma detecção", "INFO")
 
             if detections:
                 self._handle_detections(detections)
@@ -294,6 +430,8 @@ class PotholeDetectorLayout(BoxLayout):
 
         except Exception as e:
             Logger.error(f"App: Erro no processamento: {e}")
+            if self.debug_enabled:
+                self._log(f"Erro: {e}", "ALERT")
 
     def _handle_detections(self, detections):
         """Processa detecções encontradas."""
@@ -315,6 +453,10 @@ class PotholeDetectorLayout(BoxLayout):
                 f"⚠️ BURACO DETECTADO!\nConfiança: {avg_conf:.0%}",
                 warning=True
             )
+            
+            # Log detalhado de detecção
+            for i, (x, y, w, h, conf) in enumerate(detections):
+                self._log(f"Buraco #{i+1}: conf={conf:.0%} pos=({x:.2f},{y:.2f})", "ALERT")
             
             self._vibrate()
 
