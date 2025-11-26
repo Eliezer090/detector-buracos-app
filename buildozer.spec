@@ -16,7 +16,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,mp3,onnx
 
 # Versão
-version = 1.0.8
+version = 1.0.9
 
 # Requisitos com OpenCV para detecção de qualidade
 requirements = python3,kivy==2.2.0,numpy,opencv,pillow,android,pyjnius

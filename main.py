@@ -180,6 +180,7 @@ class PotholeDetectorLayout(BoxLayout):
         self.frame_count = 0
         self.last_fps_time = datetime.now()
         self.current_fps = 0
+        self.rotation_mode = 0  # 0=nenhuma, 1=90°, 2=180°, 3=270°
 
         # UI Components
         self.status_label = Label(
@@ -221,13 +222,31 @@ class PotholeDetectorLayout(BoxLayout):
 
         # Botão de Debug
         self.debug_btn = Button(
-            text="📊 Mostrar Debug",
-            size_hint=(0.5, None),
+            text="📊 Debug",
+            size_hint=(0.33, None),
             height=40,
-            background_color=(0.3, 0.3, 0.5, 1),
-            pos_hint={'center_x': 0.5}
+            background_color=(0.3, 0.3, 0.5, 1)
         )
         self.debug_btn.bind(on_press=self._toggle_debug)
+
+        # Botão de Rotação
+        self.rotate_btn = Button(
+            text="🔄 Rotação: 0°",
+            size_hint=(0.33, None),
+            height=40,
+            background_color=(0.3, 0.5, 0.3, 1)
+        )
+        self.rotate_btn.bind(on_press=self._toggle_rotation)
+
+        # Container para botões
+        self.buttons_container = BoxLayout(
+            orientation='horizontal',
+            size_hint=(1, None),
+            height=40,
+            spacing=5
+        )
+        self.buttons_container.add_widget(self.debug_btn)
+        self.buttons_container.add_widget(self.rotate_btn)
 
         # Botão de permissão (inicialmente oculto)
         self.permission_btn = Button(
@@ -242,7 +261,7 @@ class PotholeDetectorLayout(BoxLayout):
         # Montar layout
         self.add_widget(self.status_label)
         self.add_widget(self.counter_label)
-        self.add_widget(self.debug_btn)
+        self.add_widget(self.buttons_container)
         self.add_widget(self.debug_panel)
         self.add_widget(self.camera_container)
         self.add_widget(self.permission_btn)
@@ -257,15 +276,23 @@ class PotholeDetectorLayout(BoxLayout):
         if self.debug_enabled:
             self.debug_panel.opacity = 1
             self.debug_panel.height = 150
-            self.debug_btn.text = "📊 Ocultar Debug"
+            self.debug_btn.text = "📊 Ocultar"
             self.debug_btn.background_color = (0.5, 0.3, 0.3, 1)
             self._log("Painel de debug ativado", "OK")
             self._log(f"Detector: {type(self.detector).__name__ if self.detector else 'Não inicializado'}", "INFO")
+            self._log(f"Rotação atual: {self.rotation_mode * 90}°", "INFO")
         else:
             self.debug_panel.opacity = 0
             self.debug_panel.height = 0
-            self.debug_btn.text = "📊 Mostrar Debug"
+            self.debug_btn.text = "📊 Debug"
             self.debug_btn.background_color = (0.3, 0.3, 0.5, 1)
+
+    def _toggle_rotation(self, *_):
+        """Alterna entre os modos de rotação da câmera."""
+        self.rotation_mode = (self.rotation_mode + 1) % 4
+        rotation_degrees = self.rotation_mode * 90
+        self.rotate_btn.text = f"🔄 Rotação: {rotation_degrees}°"
+        self._log(f"Rotação alterada para {rotation_degrees}°", "OK")
 
     def _log(self, message: str, level: str = "INFO"):
         """Adiciona log ao painel de debug."""
@@ -473,11 +500,14 @@ class PotholeDetectorLayout(BoxLayout):
             frame = frame.reshape(texture.height, texture.width, 4)
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
             
-            # Corrigir orientação: rotacionar frame se necessário
-            # A câmera do Android geralmente vem em landscape, precisamos corrigir
-            if IS_ANDROID:
-                # Rotaciona 90 graus no sentido horário para portrait
+            # Aplicar rotação conforme configuração do usuário
+            if self.rotation_mode == 1:  # 90°
                 frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_CLOCKWISE)
+            elif self.rotation_mode == 2:  # 180°
+                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+            elif self.rotation_mode == 3:  # 270°
+                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # rotation_mode == 0: sem rotação
 
             detections = self.detector.detect(frame_bgr)
             
