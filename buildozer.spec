@@ -16,10 +16,10 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,mp3
 
 # Versão
-version = 1.0.1
+version = 1.0.3
 
-# Requisitos - IMPORTANTE: ordem e versões específicas
-requirements = python3==3.10.13,hostpython3==3.10.13,kivy==2.3.0,numpy,opencv,pillow,android,pyjnius
+# Requisitos com OpenCV para detecção de qualidade
+requirements = python3,kivy==2.2.0,numpy,opencv,pillow,android,pyjnius
 
 # Orientação
 orientation = landscape

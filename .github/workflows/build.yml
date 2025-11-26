@@ -14,11 +14,18 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180  # 3 horas para OpenCV compilar
     
     steps:
     - name: Checkout código
       uses: actions/checkout@v4
+
+    - name: Liberar espaço em disco
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        df -h
     
     - name: Setup Java 17
       uses: actions/setup-java@v4
@@ -35,74 +42,93 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          git zip unzip wget \
+          git zip unzip wget curl \
           build-essential libssl-dev libffi-dev \
           libltdl-dev autoconf automake libtool pkg-config \
-          zlib1g-dev libncurses-dev cmake \
+          zlib1g-dev libncurses-dev cmake ninja-build \
           libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
           libjpeg-dev libpng-dev libfreetype6-dev \
           libgl1-mesa-dev libgles2-mesa-dev \
           libmtdev-dev libusb-1.0-0-dev libudev-dev \
-          lld
+          ccache lld
     
-    - name: Cache Buildozer
+    # Cache agressivo - salva tudo do buildozer incluindo OpenCV compilado
+    - name: Cache Buildozer (incluindo OpenCV)
       uses: actions/cache@v4
       with:
         path: |
           .buildozer
           ~/.buildozer
-        key: buildozer-v3-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-opencv-v5-${{ hashFiles('buildozer.spec') }}
         restore-keys: |
-          buildozer-v3-
+          buildozer-opencv-v5-
+          buildozer-opencv-v4-
+          buildozer-opencv-
     
     - name: Cache pip
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: pip-v2-${{ hashFiles('requirements.txt') }}
+        key: pip-v3-buildozer
 
-    - name: Instalar dependências Python
+    - name: Instalar Buildozer e Cython
       run: |
         pip install --upgrade pip setuptools wheel
         pip install buildozer==1.5.0
         pip install cython==0.29.36
 
-    - name: Limpar cache problemático (se existir)
+    - name: Mostrar informações do ambiente
       run: |
-        # Remove hostpython problemático de builds anteriores
-        rm -rf .buildozer/android/platform/build-*/build/other_builds/hostpython3 || true
-        rm -rf ~/.buildozer/android/platform/build-*/build/other_builds/hostpython3 || true
+        python --version
+        pip --version
+        buildozer version
+        echo "Espaço em disco:"
+        df -h
+        echo "Memória:"
+        free -h
 
     - name: Build APK Debug
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+        # Usar ccache para acelerar recompilações
+        export USE_CCACHE=1
+        export CCACHE_DIR=$HOME/.ccache
+        # Build com log completo
         yes | buildozer -v android debug 2>&1 | tee build.log
       env:
         ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
         ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-    
-    - name: Verificar APK gerado
+
+    - name: Listar conteúdo do diretório
+      if: always()
       run: |
-        if [ -d "bin" ]; then
-          ls -lh bin/
-        else
-          echo "Diretório bin não encontrado"
-          exit 1
-        fi
+        echo "=== Conteúdo raiz ==="
+        ls -la
+        echo "=== Conteúdo bin (se existir) ==="
+        ls -la bin/ 2>/dev/null || echo "Diretório bin não existe"
+        echo "=== Procurando APKs ==="
+        find . -name "*.apk" -type f 2>/dev/null || echo "Nenhum APK encontrado"
     
     - name: Upload APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: pothole-detector-apk
+        name: detector-buracos-apk
         path: bin/*.apk
         if-no-files-found: error
-    
-    - name: Upload logs em caso de erro
-      if: failure()
+
+    - name: Upload logs (sempre)
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: buildozer-logs
+        name: build-logs
         path: |
           build.log
-          .buildozer/logs/*
-          .buildozer/android/platform/build-*/logs/*
+          .buildozer/logs/
+        if-no-files-found: ignore
+
+    - name: Mostrar últimas linhas do log em caso de erro
+      if: failure()
+      run: |
+        echo "=== Últimas 200 linhas do build.log ==="
+        tail -200 build.log || echo "build.log não encontrado"

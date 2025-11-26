@@ -233,8 +233,9 @@ class PotholeDetectorLayout(BoxLayout):
         """Inicia processamento de frames."""
         if self.processing_event:
             return
-        self.processing_event = Clock.schedule_interval(self._process_frame, 1/8)
-        Logger.info("App: Processamento de frames iniciado")
+        # 10 FPS para boa detecção sem drenar bateria
+        self.processing_event = Clock.schedule_interval(self._process_frame, 1/10)
+        Logger.info("App: Processamento de frames iniciado (10 FPS)")
 
     def _stop_processing(self):
         """Para processamento de frames."""
