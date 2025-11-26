@@ -16,7 +16,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,mp3
 
 # Versão
-version = 1.0.3
+version = 1.0.4
 
 # Requisitos com OpenCV para detecção de qualidade
 requirements = python3,kivy==2.2.0,numpy,opencv,pillow,android,pyjnius
@@ -29,9 +29,6 @@ fullscreen = 1
 
 # Permissões Android
 android.permissions = android.permission.CAMERA,android.permission.VIBRATE,android.permission.WAKE_LOCK
-
-# Features Android
-android.features = android.hardware.camera,android.hardware.camera.autofocus
 
 # API Android
 android.api = 33
