@@ -327,50 +327,93 @@ class PotholeDetectorLayout(BoxLayout):
         self._log("Permissão de câmera negada", "ALERT")
 
     def _init_camera(self):
-        """Inicializa a câmera."""
+        """Inicializa a câmera com tratamento robusto de erros."""
         self._update_status("Iniciando câmera...")
         self._log("Inicializando câmera...", "INFO")
 
-        try:
-            from kivy.uix.camera import Camera
-            from kivy.uix.image import Image
-            
-            if self.camera_placeholder.parent:
-                self.camera_container.remove_widget(self.camera_placeholder)
+        # Tentar múltiplas configurações de câmera
+        camera_configs = [
+            {"resolution": (640, 480), "index": 0},   # Baixa resolução, câmera 0
+            {"resolution": (1280, 720), "index": 0},  # HD, câmera 0
+            {"resolution": (640, 480), "index": 1},   # Baixa resolução, câmera 1
+            {"resolution": (320, 240), "index": 0},   # Muito baixa, câmera 0
+        ]
+        
+        for i, config in enumerate(camera_configs):
+            try:
+                self._log(f"Tentativa {i+1}: res={config['resolution']}, cam={config['index']}", "INFO")
+                self._try_init_camera(config["resolution"], config["index"])
+                return  # Sucesso!
+            except Exception as e:
+                error_msg = str(e)
+                self._log(f"Falha tentativa {i+1}: {error_msg[:50]}", "ALERT")
+                Logger.warning(f"App: Câmera config {i+1} falhou: {e}")
+                continue
+        
+        # Todas as tentativas falharam
+        self._log("ERRO: Todas as configurações de câmera falharam!", "ALERT")
+        self._show_camera_error("Não foi possível iniciar a câmera.\nTente reiniciar o app.")
 
-            # Usar câmera traseira (index=0 geralmente é traseira no Android)
-            self.camera = Camera(
-                resolution=(720, 1280),  # Resolução em portrait
-                play=True,
-                index=0,
-                allow_stretch=True,
-                keep_ratio=True
-            )
-            
-            self.camera_container.add_widget(self.camera, index=1)
+    def _try_init_camera(self, resolution, index):
+        """Tenta inicializar a câmera com uma configuração específica."""
+        from kivy.uix.camera import Camera
+        
+        if self.camera_placeholder.parent:
+            self.camera_container.remove_widget(self.camera_placeholder)
+        
+        # Remove câmera anterior se existir
+        if self.camera and self.camera.parent:
+            self.camera_container.remove_widget(self.camera)
+            self.camera = None
 
-            self.permission_btn.opacity = 0
-            self.permission_btn.disabled = True
+        self.camera = Camera(
+            resolution=resolution,
+            play=False,  # Inicia pausado para evitar erro
+            index=index,
+            allow_stretch=True,
+            keep_ratio=True
+        )
+        
+        self.camera_container.add_widget(self.camera, index=1)
+        
+        # Agendar início com delay para estabilizar
+        def start_camera(*_):
+            try:
+                self.camera.play = True
+                self._log(f"Câmera iniciada: {resolution[0]}x{resolution[1]}", "OK")
+                self._update_status("Monitorando pista...")
+                self.permission_btn.opacity = 0
+                self.permission_btn.disabled = True
+                self._start_processing()
+            except Exception as e:
+                self._log(f"Erro ao iniciar play: {e}", "ALERT")
+                raise e
+        
+        Clock.schedule_once(start_camera, 0.5)
 
-            self._update_status("Monitorando pista...")
-            self._log("Câmera iniciada com sucesso", "OK")
-            self._log(f"Resolução: 720x1280 (portrait)", "INFO")
-            self._start_processing()
-
-        except Exception as e:
-            Logger.error(f"App: Erro ao iniciar câmera: {e}")
-            self.camera_placeholder.text = f"Erro: {e}"
-            self._update_status(f"Erro na câmera: {e}", error=True)
-            self._log(f"Erro na câmera: {e}", "ALERT")
+    def _show_camera_error(self, message):
+        """Mostra erro de câmera na interface."""
+        if self.camera_placeholder.parent is None:
+            self.camera_container.add_widget(self.camera_placeholder)
+        self.camera_placeholder.text = f"❌ Erro de Câmera\n\n{message}"
+        self._update_status("Erro na câmera", error=True)
 
     def _start_processing(self):
         """Inicia processamento de frames."""
         if self.processing_event:
             return
-        # 10 FPS para boa detecção sem drenar bateria
-        self.processing_event = Clock.schedule_interval(self._process_frame, 1/10)
-        Logger.info("App: Processamento de frames iniciado (10 FPS)")
-        self._log("Processamento iniciado (10 FPS)", "OK")
+        # Aguardar câmera estabilizar antes de processar
+        Clock.schedule_once(self._delayed_start_processing, 1.0)
+
+    def _delayed_start_processing(self, *_):
+        """Inicia processamento após delay."""
+        if self.processing_event:
+            return
+        # 5 FPS para boa detecção sem drenar bateria e evitar erros
+        self.processing_event = Clock.schedule_interval(self._process_frame, 1/5)
+        Logger.info("App: Processamento de frames iniciado (5 FPS)")
+        self._log("Processamento iniciado (5 FPS)", "OK")
+        self.consecutive_errors = 0
 
     def _stop_processing(self):
         """Para processamento de frames."""
@@ -381,7 +424,19 @@ class PotholeDetectorLayout(BoxLayout):
 
     def _process_frame(self, dt):
         """Processa um frame da câmera."""
-        if not self.camera or not self.camera.texture or not self.detector:
+        # Verificações de segurança
+        if not self.camera:
+            return
+        
+        if not self.camera.play:
+            return
+            
+        if not self.camera.texture:
+            if self.debug_enabled:
+                self._log("Aguardando texture da câmera...", "INFO")
+            return
+            
+        if not self.detector:
             return
 
         try:
@@ -397,10 +452,22 @@ class PotholeDetectorLayout(BoxLayout):
                 self.frame_count = 0
                 self.last_fps_time = now
                 if self.debug_enabled:
-                    self._log(f"FPS: {self.current_fps:.1f}", "INFO")
+                    self._log(f"FPS: {self.current_fps:.1f} | Frames OK", "INFO")
             
             texture = self.camera.texture
+            
+            # Verificar se pixels estão disponíveis
+            if texture.pixels is None:
+                return
+                
             pixels = texture.pixels
+            
+            # Verificar tamanho esperado
+            expected_size = texture.height * texture.width * 4
+            if len(pixels) != expected_size:
+                if self.debug_enabled:
+                    self._log(f"Tamanho pixels incorreto: {len(pixels)} != {expected_size}", "ALERT")
+                return
             
             frame = np.frombuffer(pixels, dtype=np.uint8)
             frame = frame.reshape(texture.height, texture.width, 4)
@@ -414,12 +481,13 @@ class PotholeDetectorLayout(BoxLayout):
 
             detections = self.detector.detect(frame_bgr)
             
+            # Resetar contador de erros após sucesso
+            self.consecutive_errors = 0
+            
             # Log de debug sobre detecção
-            if self.debug_enabled and self.frame_count % 10 == 0:  # Log a cada 10 frames
+            if self.debug_enabled and self.frame_count % 5 == 0:  # Log a cada 5 frames
                 if detections:
                     self._log(f"Detectando: {len(detections)} objeto(s)", "DETECT")
-                else:
-                    self._log("Analisando frame... nenhuma detecção", "INFO")
 
             if detections:
                 self._handle_detections(detections)
@@ -429,9 +497,18 @@ class PotholeDetectorLayout(BoxLayout):
                     self._update_status("Monitorando pista...")
 
         except Exception as e:
+            self.consecutive_errors = getattr(self, 'consecutive_errors', 0) + 1
+            error_msg = str(e)[:60]
             Logger.error(f"App: Erro no processamento: {e}")
+            
             if self.debug_enabled:
-                self._log(f"Erro: {e}", "ALERT")
+                self._log(f"Erro #{self.consecutive_errors}: {error_msg}", "ALERT")
+            
+            # Se muitos erros consecutivos, parar e reiniciar
+            if self.consecutive_errors >= 10:
+                self._log("Muitos erros! Reiniciando câmera...", "ALERT")
+                self._stop_processing()
+                Clock.schedule_once(lambda *_: self._init_camera(), 2.0)
 
     def _handle_detections(self, detections):
         """Processa detecções encontradas."""
