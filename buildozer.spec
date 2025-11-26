@@ -12,17 +12,17 @@ package.domain = org.detector.buracos
 # Diretório do código fonte
 source.dir = .
 
-# Extensões a incluir
-source.include_exts = py,png,jpg,kv,atlas,wav,mp3
+# Extensões a incluir (inclui .onnx para modelo YOLO)
+source.include_exts = py,png,jpg,kv,atlas,wav,mp3,onnx
 
 # Versão
-version = 1.0.4
+version = 1.0.6
 
 # Requisitos com OpenCV para detecção de qualidade
 requirements = python3,kivy==2.2.0,numpy,opencv,pillow,android,pyjnius
 
-# Orientação
-orientation = landscape
+# Orientação - PORTRAIT para usar na vertical
+orientation = portrait
 
 # Fullscreen
 fullscreen = 1

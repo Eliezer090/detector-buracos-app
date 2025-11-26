@@ -55,25 +55,49 @@ class AlertOverlay(Widget):
         """Redesenha quando posição/tamanho mudam."""
         self.show_detections(self._detections)
 
-    def show_detections(self, detections: List[Tuple[float, float, float, float, float]]):
-        """Desenha caixas vermelhas ao redor das detecções."""
+    def show_detections(self, detections: List[Tuple[float, float, float, float, float]], camera_widget=None):
+        """Desenha caixas vermelhas ao redor das detecções - apenas na área da câmera."""
         self._detections = detections or []
         self.canvas.after.clear()
 
         if not detections:
             return
 
-        with self.canvas.after:
-            Color(1, 0, 0, 0.15)
-            Rectangle(pos=self.pos, size=self.size)
+        # Usa dimensões da câmera se disponível, senão usa o widget
+        cam = camera_widget
+        if cam and cam.texture:
+            # Calcula área real da câmera (respeitando keep_ratio)
+            tex_w, tex_h = cam.texture.size
+            widget_w, widget_h = cam.size
+            widget_x, widget_y = cam.pos
+            
+            # Calcula escala mantendo proporção
+            scale = min(widget_w / tex_w, widget_h / tex_h)
+            cam_w = tex_w * scale
+            cam_h = tex_h * scale
+            cam_x = widget_x + (widget_w - cam_w) / 2
+            cam_y = widget_y + (widget_h - cam_h) / 2
+        else:
+            cam_x, cam_y = self.x, self.y
+            cam_w, cam_h = self.width, self.height
 
-            Color(1, 0, 0, 1)
+        with self.canvas.after:
+            # Desenha apenas as caixas de detecção (sem overlay vermelho geral)
             for x_norm, y_norm, w_norm, h_norm, conf in detections:
-                x = self.x + x_norm * self.width
-                y = self.y + (1 - y_norm - h_norm) * self.height
-                w = w_norm * self.width
-                h = h_norm * self.height
-                Line(rectangle=(x, y, w, h), width=2)
+                # Cor baseada na confiança
+                Color(1, 0, 0, min(conf + 0.3, 1.0))
+                
+                x = cam_x + x_norm * cam_w
+                y = cam_y + (1 - y_norm - h_norm) * cam_h
+                w = w_norm * cam_w
+                h = h_norm * cam_h
+                
+                # Caixa de detecção
+                Line(rectangle=(x, y, w, h), width=3)
+                
+                # Label de confiança
+                Color(1, 1, 0, 1)
+                Line(rectangle=(x, y + h, w * conf, 5), width=5)
 
     def clear(self):
         """Limpa todas as detecções."""
@@ -273,7 +297,7 @@ class PotholeDetectorLayout(BoxLayout):
 
     def _handle_detections(self, detections):
         """Processa detecções encontradas."""
-        self.alert_overlay.show_detections(detections)
+        self.alert_overlay.show_detections(detections, self.camera)
 
         now = datetime.now()
         should_alert = (
