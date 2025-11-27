@@ -22,7 +22,9 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 from kivy.utils import platform
 
@@ -104,14 +106,24 @@ class AlertOverlay(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._detections: List[Tuple[float, float, float, float, float]] = []
+        self._min_confidence = 0.5
+        self._show_all = False  # Quando True, mostra detecções de baixa confiança também
         self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+    def set_min_confidence(self, value: float):
+        """Define confiança mínima para alertas."""
+        self._min_confidence = value
+        
+    def set_show_all(self, show: bool):
+        """Define se mostra todas as detecções (debug mode)."""
+        self._show_all = show
 
     def _update_canvas(self, *_):
         """Redesenha quando posição/tamanho mudam."""
         self.show_detections(self._detections)
 
     def show_detections(self, detections: List[Tuple[float, float, float, float, float]], camera_widget=None):
-        """Desenha caixas vermelhas ao redor das detecções - apenas na área da câmera."""
+        """Desenha caixas ao redor das detecções - cores baseadas na confiança."""
         self._detections = detections or []
         self.canvas.after.clear()
 
@@ -137,10 +149,19 @@ class AlertOverlay(Widget):
             cam_w, cam_h = self.width, self.height
 
         with self.canvas.after:
-            # Desenha apenas as caixas de detecção (sem overlay vermelho geral)
             for x_norm, y_norm, w_norm, h_norm, conf in detections:
-                # Cor baseada na confiança
-                Color(1, 0, 0, min(conf + 0.3, 1.0))
+                # Filtrar por confiança (a menos que show_all esteja ativo)
+                if not self._show_all and conf < self._min_confidence:
+                    continue
+                    
+                # Cor baseada na confiança:
+                # Verde = baixa (< 30%), Amarelo = média (30-70%), Vermelho = alta (> 70%)
+                if conf >= 0.7:
+                    Color(1, 0, 0, 0.9)  # Vermelho - alta confiança
+                elif conf >= 0.3:
+                    Color(1, 0.7, 0, 0.8)  # Laranja - média confiança
+                else:
+                    Color(0, 1, 0, 0.6)  # Verde - baixa confiança
                 
                 x = cam_x + x_norm * cam_w
                 y = cam_y + (1 - y_norm - h_norm) * cam_h
@@ -150,7 +171,7 @@ class AlertOverlay(Widget):
                 # Caixa de detecção
                 Line(rectangle=(x, y, w, h), width=3)
                 
-                # Label de confiança
+                # Barra de confiança
                 Color(1, 1, 0, 1)
                 Line(rectangle=(x, y + h, w * conf, 5), width=5)
 
@@ -181,6 +202,8 @@ class PotholeDetectorLayout(BoxLayout):
         self.last_fps_time = datetime.now()
         self.current_fps = 0
         self.rotation_mode = 0  # 0=nenhuma, 1=90°, 2=180°, 3=270°
+        self.min_confidence = 0.5  # 50% padrão - ajustável nas configurações
+        self.show_low_confidence = False  # Mostrar detecções de baixa confiança
 
         # UI Components
         self.status_label = Label(
@@ -196,10 +219,10 @@ class PotholeDetectorLayout(BoxLayout):
             self.status_label, 'text_size', self.status_label.size))
 
         self.counter_label = Label(
-            text="Buracos detectados: 0",
+            text="Buracos detectados: 0 | Confiança: 50%",
             size_hint=(1, None),
             height=30,
-            font_size="16sp",
+            font_size="14sp",
             color=(1, 1, 0, 1)
         )
 
@@ -213,6 +236,7 @@ class PotholeDetectorLayout(BoxLayout):
 
         # Overlay para detecções
         self.alert_overlay = AlertOverlay()
+        self.alert_overlay.set_min_confidence(self.min_confidence)
         self.camera_container.add_widget(self.alert_overlay)
 
         # Painel de Debug (inicialmente oculto)
@@ -223,7 +247,7 @@ class PotholeDetectorLayout(BoxLayout):
         # Botão de Debug
         self.debug_btn = Button(
             text="📊 Debug",
-            size_hint=(0.33, None),
+            size_hint=(0.25, None),
             height=40,
             background_color=(0.3, 0.3, 0.5, 1)
         )
@@ -231,12 +255,30 @@ class PotholeDetectorLayout(BoxLayout):
 
         # Botão de Rotação
         self.rotate_btn = Button(
-            text="🔄 Rotação: 0°",
-            size_hint=(0.33, None),
+            text="🔄 0°",
+            size_hint=(0.25, None),
             height=40,
             background_color=(0.3, 0.5, 0.3, 1)
         )
         self.rotate_btn.bind(on_press=self._toggle_rotation)
+
+        # Botão de Configurações
+        self.config_btn = Button(
+            text="⚙️ Config",
+            size_hint=(0.25, None),
+            height=40,
+            background_color=(0.5, 0.4, 0.2, 1)
+        )
+        self.config_btn.bind(on_press=self._show_config)
+
+        # Botão Reset
+        self.reset_btn = Button(
+            text="🔃 Reset",
+            size_hint=(0.25, None),
+            height=40,
+            background_color=(0.4, 0.2, 0.2, 1)
+        )
+        self.reset_btn.bind(on_press=self._reset_counter)
 
         # Container para botões
         self.buttons_container = BoxLayout(
@@ -247,6 +289,8 @@ class PotholeDetectorLayout(BoxLayout):
         )
         self.buttons_container.add_widget(self.debug_btn)
         self.buttons_container.add_widget(self.rotate_btn)
+        self.buttons_container.add_widget(self.config_btn)
+        self.buttons_container.add_widget(self.reset_btn)
 
         # Botão de permissão (inicialmente oculto)
         self.permission_btn = Button(
@@ -269,6 +313,101 @@ class PotholeDetectorLayout(BoxLayout):
         # Inicialização
         Clock.schedule_once(self._initialize, 0.5)
 
+    def _reset_counter(self, *_):
+        """Reseta o contador de detecções."""
+        self.detection_count = 0
+        self._update_counter_label()
+        self._log("Contador resetado", "OK")
+
+    def _update_counter_label(self):
+        """Atualiza o label do contador."""
+        self.counter_label.text = f"Buracos: {self.detection_count} | Confiança mín: {int(self.min_confidence*100)}%"
+
+    def _show_config(self, *_):
+        """Mostra popup de configurações."""
+        content = BoxLayout(orientation='vertical', padding=20, spacing=15)
+        
+        # Título
+        title = Label(
+            text="[b]Configurações de Detecção[/b]",
+            markup=True,
+            size_hint=(1, None),
+            height=40,
+            font_size="18sp"
+        )
+        
+        # Slider de confiança
+        conf_container = BoxLayout(orientation='vertical', size_hint=(1, None), height=80)
+        conf_label = Label(
+            text=f"Confiança mínima: {int(self.min_confidence * 100)}%",
+            size_hint=(1, None),
+            height=30,
+            font_size="16sp"
+        )
+        conf_slider = Slider(
+            min=10,
+            max=95,
+            value=self.min_confidence * 100,
+            step=5,
+            size_hint=(1, None),
+            height=50
+        )
+        
+        def on_conf_change(instance, value):
+            conf_label.text = f"Confiança mínima: {int(value)}%"
+        
+        conf_slider.bind(value=on_conf_change)
+        conf_container.add_widget(conf_label)
+        conf_container.add_widget(conf_slider)
+        
+        # Explicação
+        help_text = Label(
+            text="[color=aaaaaa]Valores menores = mais detecções (mais falsos positivos)\n"
+                 "Valores maiores = menos detecções (mais preciso)[/color]",
+            markup=True,
+            size_hint=(1, None),
+            height=60,
+            font_size="12sp",
+            halign="center"
+        )
+        help_text.bind(size=lambda *_: setattr(help_text, 'text_size', help_text.size))
+        
+        # Botões
+        btn_container = BoxLayout(orientation='horizontal', size_hint=(1, None), height=50, spacing=10)
+        
+        cancel_btn = Button(text="Cancelar", background_color=(0.5, 0.3, 0.3, 1))
+        save_btn = Button(text="Salvar", background_color=(0.3, 0.5, 0.3, 1))
+        
+        btn_container.add_widget(cancel_btn)
+        btn_container.add_widget(save_btn)
+        
+        content.add_widget(title)
+        content.add_widget(conf_container)
+        content.add_widget(help_text)
+        content.add_widget(Widget())  # Spacer
+        content.add_widget(btn_container)
+        
+        popup = Popup(
+            title="⚙️ Configurações",
+            content=content,
+            size_hint=(0.9, 0.6),
+            auto_dismiss=False
+        )
+        
+        def save_config(*_):
+            self.min_confidence = conf_slider.value / 100.0
+            self.alert_overlay.set_min_confidence(self.min_confidence)
+            if self.detector:
+                self.detector.min_confidence = self.min_confidence
+            self._update_counter_label()
+            self._log(f"Confiança alterada para {int(self.min_confidence*100)}%", "OK")
+            popup.dismiss()
+        
+        cancel_btn.bind(on_press=popup.dismiss)
+        save_btn.bind(on_press=save_config)
+        
+        popup.open()
+
     def _toggle_debug(self, *_):
         """Liga/desliga o painel de debug."""
         self.debug_enabled = not self.debug_enabled
@@ -276,26 +415,31 @@ class PotholeDetectorLayout(BoxLayout):
         if self.debug_enabled:
             self.debug_panel.opacity = 1
             self.debug_panel.height = 150
-            self.debug_btn.text = "📊 Ocultar"
+            self.debug_btn.text = "📊 Off"
             self.debug_btn.background_color = (0.5, 0.3, 0.3, 1)
-            self._log("Painel de debug ativado", "OK")
-            self._log(f"Detector: {type(self.detector).__name__ if self.detector else 'Não inicializado'}", "INFO")
-            self._log(f"Rotação atual: {self.rotation_mode * 90}°", "INFO")
+            # Ativar visualização de todas as detecções
+            self.alert_overlay.set_show_all(True)
+            self._log("Debug ATIVADO - mostrando todas as detecções", "OK")
+            self._log(f"Detector: {self.detector.detector_name if self.detector else 'Não inicializado'}", "INFO")
+            self._log(f"Confiança mínima: {int(self.min_confidence*100)}%", "INFO")
+            self._log(f"Rotação: {self.rotation_mode * 90}°", "INFO")
         else:
             self.debug_panel.opacity = 0
             self.debug_panel.height = 0
             self.debug_btn.text = "📊 Debug"
             self.debug_btn.background_color = (0.3, 0.3, 0.5, 1)
+            # Desativar visualização de baixa confiança
+            self.alert_overlay.set_show_all(False)
 
     def _toggle_rotation(self, *_):
         """Alterna entre os modos de rotação da câmera."""
         self.rotation_mode = (self.rotation_mode + 1) % 4
         rotation_degrees = self.rotation_mode * 90
-        self.rotate_btn.text = f"🔄 Rotação: {rotation_degrees}°"
+        self.rotate_btn.text = f"🔄 {rotation_degrees}°"
         self._log(f"Rotação alterada para {rotation_degrees}°", "OK")
 
     def _log(self, message: str, level: str = "INFO"):
-        """Adiciona log ao painel de debug."""
+        """Adiciona log ao painel de debug - sempre adiciona quando debug está ativo."""
         if self.debug_enabled:
             self.debug_panel.add_log(message, level)
 
@@ -509,18 +653,32 @@ class PotholeDetectorLayout(BoxLayout):
                 frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
             # rotation_mode == 0: sem rotação
 
-            detections = self.detector.detect(frame_bgr)
+            # Detectar TODOS os objetos (sem filtro)
+            all_detections = self.detector.detect(frame_bgr, return_all=True)
             
             # Resetar contador de erros após sucesso
             self.consecutive_errors = 0
             
-            # Log de debug sobre detecção
-            if self.debug_enabled and self.frame_count % 5 == 0:  # Log a cada 5 frames
-                if detections:
-                    self._log(f"Detectando: {len(detections)} objeto(s)", "DETECT")
+            # Filtrar por confiança para alertas
+            high_conf_detections = [d for d in all_detections if d[4] >= self.min_confidence]
+            
+            # Log de debug detalhado
+            if self.debug_enabled:
+                if all_detections:
+                    # Mostra TODAS as detecções no log
+                    for i, (x, y, w, h, conf) in enumerate(all_detections):
+                        level = "ALERT" if conf >= self.min_confidence else "DETECT" if conf >= 0.3 else "INFO"
+                        self._log(f"#{i+1}: {conf*100:.0f}% @ ({x:.2f},{y:.2f})", level)
+                elif self.frame_count % 10 == 0:  # Log periódico quando vazio
+                    self._log("Analisando... nenhuma detecção", "INFO")
 
-            if detections:
-                self._handle_detections(detections)
+            # Mostrar todas as detecções visualmente (overlay filtra por show_all)
+            if all_detections:
+                self.alert_overlay.show_detections(all_detections, self.camera)
+                
+                # Alertar apenas para detecções de alta confiança
+                if high_conf_detections:
+                    self._handle_detections(high_conf_detections)
             else:
                 self.alert_overlay.clear()
                 if "Buraco" in self.status_label.text or "BURACO" in self.status_label.text:
@@ -541,29 +699,23 @@ class PotholeDetectorLayout(BoxLayout):
                 Clock.schedule_once(lambda *_: self._init_camera(), 2.0)
 
     def _handle_detections(self, detections):
-        """Processa detecções encontradas."""
-        self.alert_overlay.show_detections(detections, self.camera)
-
+        """Processa detecções de ALTA CONFIANÇA encontradas."""
         now = datetime.now()
         should_alert = (
             self.last_alert_time is None or
             (now - self.last_alert_time).total_seconds() >= self.alert_cooldown
         )
 
-        if should_alert:
+        if should_alert and detections:
             self.last_alert_time = now
             self.detection_count += len(detections)
-            self.counter_label.text = f"Buracos detectados: {self.detection_count}"
+            self._update_counter_label()
 
             avg_conf = sum(d[4] for d in detections) / len(detections)
             self._update_status(
-                f"⚠️ BURACO DETECTADO!\nConfiança: {avg_conf:.0%}",
+                f"⚠️ BURACO! ({len(detections)}x)\nConfiança: {avg_conf:.0%}",
                 warning=True
             )
-            
-            # Log detalhado de detecção
-            for i, (x, y, w, h, conf) in enumerate(detections):
-                self._log(f"Buraco #{i+1}: conf={conf:.0%} pos=({x:.2f},{y:.2f})", "ALERT")
             
             self._vibrate()
 

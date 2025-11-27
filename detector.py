@@ -33,7 +33,7 @@ class PotholeDetector:
         try:
             from detector_yolo import YOLOPotholeDetector
             self._detector = YOLOPotholeDetector(
-                conf_threshold=self.min_confidence
+                conf_threshold=0.1  # Baixo para capturar tudo, filtrar na UI
             )
             if self._detector.model_loaded:
                 print("✅ Usando detector YOLO (alta precisão)")
@@ -45,19 +45,20 @@ class PotholeDetector:
         try:
             from detector_heuristic import HeuristicPotholeDetector
             self._detector = HeuristicPotholeDetector(
-                min_confidence=max(0.85, self.min_confidence)  # Mais rigoroso
+                min_confidence=0.2  # Baixo para capturar tudo, filtrar na UI
             )
-            print("⚠️ Usando detector heurístico (fallback - menos preciso)")
+            print("⚠️ Usando detector heurístico (fallback)")
         except Exception as e:
             print(f"Erro ao inicializar detector: {e}")
             self._detector = None
 
-    def detect(self, frame) -> List[Tuple[float, float, float, float, float]]:
+    def detect(self, frame, return_all: bool = True) -> List[Tuple[float, float, float, float, float]]:
         """
         Detecta buracos no frame.
 
         Args:
             frame: Imagem BGR (formato OpenCV)
+            return_all: Se True, retorna todas as detecções. Se False, filtra por min_confidence.
 
         Returns:
             Lista de tuplas (x, y, w, h, confidence) com coordenadas normalizadas (0-1)
@@ -67,6 +68,8 @@ class PotholeDetector:
         
         try:
             detections = self._detector.detect(frame)
+            if return_all:
+                return detections
             # Filtra por confiança mínima
             return [d for d in detections if d[4] >= self.min_confidence]
         except Exception as e:

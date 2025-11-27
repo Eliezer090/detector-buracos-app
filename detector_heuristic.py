@@ -26,18 +26,18 @@ class HeuristicPotholeDetector:
         '_frame_count', '_last_detections'
     ]
 
-    def __init__(self, min_confidence: float = 0.90):
+    def __init__(self, min_confidence: float = 0.20):
         """
         Args:
             min_confidence: Confiança mínima (0.0-1.0) para reportar detecção.
-                           Default: 0.90 (90%) para evitar falsos positivos.
+                           Default: 0.20 (20%) - captura mais detecções, filtro na UI.
         """
         self.min_confidence = min_confidence
         
-        # Parâmetros de detecção mais rigorosos para evitar falsos positivos
-        self.min_area_ratio = 0.005    # 0.5% do frame (maior = menos ruído)
-        self.max_area_ratio = 0.12     # 12% do frame
-        self.roi_y_start = 0.50        # Começa em 50% (apenas metade inferior = pista)
+        # Parâmetros de detecção - menos rigorosos para capturar mais
+        self.min_area_ratio = 0.003    # 0.3% do frame
+        self.max_area_ratio = 0.15     # 15% do frame
+        self.roi_y_start = 0.40        # Começa em 40% (mais área de detecção)
         
         # Kernels pré-computados (evita recriar a cada frame)
         self._kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
