@@ -437,6 +437,45 @@ class PotholeDetectorLayout(BoxLayout):
         rotation_degrees = self.rotation_mode * 90
         self.rotate_btn.text = f"🔄 {rotation_degrees}°"
         self._log(f"Rotação alterada para {rotation_degrees}°", "OK")
+        
+        # Aplicar rotação visual na câmera
+        self._apply_camera_rotation()
+
+    def _apply_camera_rotation(self):
+        """Aplica rotação visual ao widget da câmera."""
+        if not self.camera:
+            return
+            
+        from kivy.graphics import PushMatrix, PopMatrix, Rotate
+        
+        # Limpar transformações anteriores
+        self.camera.canvas.before.clear()
+        self.camera.canvas.after.clear()
+        
+        if self.rotation_mode == 0:
+            self._log("Rotação: 0° (sem transformação)", "INFO")
+            return
+        
+        rotation_degrees = self.rotation_mode * 90
+        cx = self.camera.center_x
+        cy = self.camera.center_y
+        
+        self._log(f"Aplicando rotação {rotation_degrees}° em ({cx:.0f}, {cy:.0f})", "INFO")
+        
+        with self.camera.canvas.before:
+            PushMatrix()
+            Rotate(angle=rotation_degrees, origin=(cx, cy))
+        
+        with self.camera.canvas.after:
+            PopMatrix()
+        
+        # Rebind para atualizar quando a câmera mudar de tamanho
+        self.camera.bind(size=self._on_camera_size_change, pos=self._on_camera_size_change)
+
+    def _on_camera_size_change(self, *_):
+        """Reaplica rotação quando tamanho/posição muda."""
+        if self.rotation_mode != 0:
+            Clock.schedule_once(lambda *_: self._apply_camera_rotation(), 0.1)
 
     def _log(self, message: str, level: str = "INFO"):
         """Adiciona log ao painel de debug - sempre adiciona quando debug está ativo."""
@@ -542,8 +581,12 @@ class PotholeDetectorLayout(BoxLayout):
             play=False,  # Inicia pausado para evitar erro
             index=index,
             allow_stretch=True,
-            keep_ratio=True
+            keep_ratio=False  # Preencher todo o espaço
         )
+        
+        # Posicionar câmera para preencher container
+        self.camera.size_hint = (1, 1)
+        self.camera.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
         
         self.camera_container.add_widget(self.camera, index=1)
         
@@ -555,6 +598,8 @@ class PotholeDetectorLayout(BoxLayout):
                 self._update_status("Monitorando pista...")
                 self.permission_btn.opacity = 0
                 self.permission_btn.disabled = True
+                # Aplicar rotação inicial se configurada
+                Clock.schedule_once(lambda *_: self._apply_camera_rotation(), 0.3)
                 self._start_processing()
             except Exception as e:
                 self._log(f"Erro ao iniciar play: {e}", "ALERT")
