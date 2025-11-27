@@ -26,6 +26,7 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
+from kivy.uix.checkbox import CheckBox
 from kivy.uix.widget import Widget
 from kivy.utils import platform
 
@@ -203,6 +204,7 @@ class PotholeDetectorLayout(BoxLayout):
         self.last_fps_time = datetime.now()
         self.current_fps = 0
         self.rotation_mode = 0  # 0=nenhuma, 1=90°, 2=180°, 3=270°
+        self.mirror_mode = False  # Espelhar imagem horizontalmente
         self.min_confidence = 0.5  # 50% padrão - ajustável nas configurações
         self.show_low_confidence = False  # Mostrar detecções de baixa confiança
 
@@ -368,13 +370,30 @@ class PotholeDetectorLayout(BoxLayout):
         conf_container.add_widget(conf_label)
         conf_container.add_widget(conf_slider)
         
+        # Opção de espelhamento
+        mirror_container = BoxLayout(orientation='horizontal', size_hint=(1, None), height=50)
+        mirror_label = Label(
+            text="Espelhar imagem:",
+            size_hint=(0.7, 1),
+            font_size="16sp",
+            halign="left"
+        )
+        mirror_label.bind(size=lambda *_: setattr(mirror_label, 'text_size', mirror_label.size))
+        mirror_check = CheckBox(
+            active=self.mirror_mode,
+            size_hint=(0.3, 1)
+        )
+        mirror_container.add_widget(mirror_label)
+        mirror_container.add_widget(mirror_check)
+        
         # Explicação
         help_text = Label(
             text="[color=aaaaaa]Valores menores = mais detecções (mais falsos positivos)\n"
-                 "Valores maiores = menos detecções (mais preciso)[/color]",
+                 "Valores maiores = menos detecções (mais preciso)\n"
+                 "Espelhar: inverte a imagem horizontalmente[/color]",
             markup=True,
             size_hint=(1, None),
-            height=60,
+            height=70,
             font_size="12sp",
             halign="center"
         )
@@ -391,8 +410,8 @@ class PotholeDetectorLayout(BoxLayout):
         
         content.add_widget(title)
         content.add_widget(conf_container)
+        content.add_widget(mirror_container)
         content.add_widget(help_text)
-        content.add_widget(Widget())  # Spacer
         content.add_widget(btn_container)
         
         popup = Popup(
@@ -404,11 +423,13 @@ class PotholeDetectorLayout(BoxLayout):
         
         def save_config(*_):
             self.min_confidence = conf_slider.value / 100.0
+            self.mirror_mode = mirror_check.active
             self.alert_overlay.set_min_confidence(self.min_confidence)
             if self.detector:
                 self.detector.min_confidence = self.min_confidence
             self._update_counter_label()
             self._log(f"Confiança alterada para {int(self.min_confidence*100)}%", "OK")
+            self._log(f"Espelhamento: {'Ativado' if self.mirror_mode else 'Desativado'}", "OK")
             popup.dismiss()
         
         cancel_btn.bind(on_press=popup.dismiss)
@@ -600,10 +621,10 @@ class PotholeDetectorLayout(BoxLayout):
         """Inicia processamento após delay."""
         if self.processing_event:
             return
-        # 5 FPS para boa detecção sem drenar bateria e evitar erros
-        self.processing_event = Clock.schedule_interval(self._process_frame, 1/5)
-        Logger.info("App: Processamento de frames iniciado (5 FPS)")
-        self._log("Processamento iniciado (5 FPS)", "OK")
+        # 60 FPS para alta velocidade (100 km/h)
+        self.processing_event = Clock.schedule_interval(self._process_frame, 1/60)
+        Logger.info("App: Processamento de frames iniciado (60 FPS)")
+        self._log("Processamento iniciado (60 FPS)", "OK")
         self.consecutive_errors = 0
 
     def _stop_processing(self):
@@ -664,6 +685,10 @@ class PotholeDetectorLayout(BoxLayout):
             frame = np.frombuffer(pixels, dtype=np.uint8)
             frame = frame.reshape(texture.height, texture.width, 4)
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+            
+            # Aplicar espelhamento horizontal se ativado
+            if self.mirror_mode:
+                frame_bgr = cv2.flip(frame_bgr, 1)  # 1 = horizontal
             
             # Aplicar rotação conforme configuração do usuário
             if self.rotation_mode == 1:  # 90°
