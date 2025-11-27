@@ -15,12 +15,13 @@ os.environ.setdefault('KIVY_LOG_LEVEL', 'info')
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Line, Rectangle, PushMatrix, PopMatrix, Rotate
+from kivy.graphics import Color, Line, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.logger import Logger
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
@@ -122,7 +123,7 @@ class AlertOverlay(Widget):
         """Redesenha quando posição/tamanho mudam."""
         self.show_detections(self._detections)
 
-    def show_detections(self, detections: List[Tuple[float, float, float, float, float]], camera_widget=None):
+    def show_detections(self, detections: List[Tuple[float, float, float, float, float]], display_widget=None):
         """Desenha caixas ao redor das detecções - cores baseadas na confiança."""
         self._detections = detections or []
         self.canvas.after.clear()
@@ -130,23 +131,23 @@ class AlertOverlay(Widget):
         if not detections:
             return
 
-        # Usa dimensões da câmera se disponível, senão usa o widget
-        cam = camera_widget
-        if cam and cam.texture:
-            # Calcula área real da câmera (respeitando keep_ratio)
-            tex_w, tex_h = cam.texture.size
-            widget_w, widget_h = cam.size
-            widget_x, widget_y = cam.pos
+        # Usa dimensões do widget de display (Image ou Camera)
+        widget = display_widget
+        if widget and widget.texture:
+            # Calcula área real do display
+            tex_w, tex_h = widget.texture.size
+            widget_w, widget_h = widget.size
+            widget_x, widget_y = widget.pos
             
             # Calcula escala mantendo proporção
-            scale = min(widget_w / tex_w, widget_h / tex_h)
-            cam_w = tex_w * scale
-            cam_h = tex_h * scale
-            cam_x = widget_x + (widget_w - cam_w) / 2
-            cam_y = widget_y + (widget_h - cam_h) / 2
+            scale = min(widget_w / tex_w, widget_h / tex_h) if tex_w > 0 and tex_h > 0 else 1
+            disp_w = tex_w * scale
+            disp_h = tex_h * scale
+            disp_x = widget_x + (widget_w - disp_w) / 2
+            disp_y = widget_y + (widget_h - disp_h) / 2
         else:
-            cam_x, cam_y = self.x, self.y
-            cam_w, cam_h = self.width, self.height
+            disp_x, disp_y = self.x, self.y
+            disp_w, disp_h = self.width, self.height
 
         with self.canvas.after:
             for x_norm, y_norm, w_norm, h_norm, conf in detections:
@@ -163,10 +164,10 @@ class AlertOverlay(Widget):
                 else:
                     Color(0, 1, 0, 0.6)  # Verde - baixa confiança
                 
-                x = cam_x + x_norm * cam_w
-                y = cam_y + (1 - y_norm - h_norm) * cam_h
-                w = w_norm * cam_w
-                h = h_norm * cam_h
+                x = disp_x + x_norm * disp_w
+                y = disp_y + (1 - y_norm - h_norm) * disp_h
+                w = w_norm * disp_w
+                h = h_norm * disp_h
                 
                 # Caixa de detecção
                 Line(rectangle=(x, y, w, h), width=3)
@@ -226,13 +227,20 @@ class PotholeDetectorLayout(BoxLayout):
             color=(1, 1, 0, 1)
         )
 
-        # Container para câmera
+        # Container para visualização
         self.camera_container = FloatLayout(size_hint=(1, 1))
         self.camera_placeholder = Label(
             text="Aguardando permissão da câmera...",
             halign="center"
         )
         self.camera_container.add_widget(self.camera_placeholder)
+
+        # Widget Image para mostrar o frame processado (rotacionado)
+        self.display_image = Image(
+            size_hint=(1, 1),
+            allow_stretch=True,
+            keep_ratio=False
+        )
 
         # Overlay para detecções
         self.alert_overlay = AlertOverlay()
@@ -437,45 +445,7 @@ class PotholeDetectorLayout(BoxLayout):
         rotation_degrees = self.rotation_mode * 90
         self.rotate_btn.text = f"🔄 {rotation_degrees}°"
         self._log(f"Rotação alterada para {rotation_degrees}°", "OK")
-        
-        # Aplicar rotação visual na câmera
-        self._apply_camera_rotation()
-
-    def _apply_camera_rotation(self):
-        """Aplica rotação visual ao widget da câmera."""
-        if not self.camera:
-            return
-            
-        from kivy.graphics import PushMatrix, PopMatrix, Rotate
-        
-        # Limpar transformações anteriores
-        self.camera.canvas.before.clear()
-        self.camera.canvas.after.clear()
-        
-        if self.rotation_mode == 0:
-            self._log("Rotação: 0° (sem transformação)", "INFO")
-            return
-        
-        rotation_degrees = self.rotation_mode * 90
-        cx = self.camera.center_x
-        cy = self.camera.center_y
-        
-        self._log(f"Aplicando rotação {rotation_degrees}° em ({cx:.0f}, {cy:.0f})", "INFO")
-        
-        with self.camera.canvas.before:
-            PushMatrix()
-            Rotate(angle=rotation_degrees, origin=(cx, cy))
-        
-        with self.camera.canvas.after:
-            PopMatrix()
-        
-        # Rebind para atualizar quando a câmera mudar de tamanho
-        self.camera.bind(size=self._on_camera_size_change, pos=self._on_camera_size_change)
-
-    def _on_camera_size_change(self, *_):
-        """Reaplica rotação quando tamanho/posição muda."""
-        if self.rotation_mode != 0:
-            Clock.schedule_once(lambda *_: self._apply_camera_rotation(), 0.1)
+        self._log("A visualização agora mostra o mesmo que o detector vê", "INFO")
 
     def _log(self, message: str, level: str = "INFO"):
         """Adiciona log ao painel de debug - sempre adiciona quando debug está ativo."""
@@ -571,35 +541,40 @@ class PotholeDetectorLayout(BoxLayout):
         if self.camera_placeholder.parent:
             self.camera_container.remove_widget(self.camera_placeholder)
         
-        # Remove câmera anterior se existir
+        # Remove câmera/display anterior se existir
         if self.camera and self.camera.parent:
             self.camera_container.remove_widget(self.camera)
             self.camera = None
+        if self.display_image.parent:
+            self.camera_container.remove_widget(self.display_image)
 
+        # Câmera oculta (apenas para captura)
         self.camera = Camera(
             resolution=resolution,
-            play=False,  # Inicia pausado para evitar erro
+            play=False,
             index=index,
             allow_stretch=True,
-            keep_ratio=False  # Preencher todo o espaço
+            keep_ratio=False
         )
-        
-        # Posicionar câmera para preencher container
+        self.camera.opacity = 0  # Ocultar câmera - vamos mostrar display_image
         self.camera.size_hint = (1, 1)
-        self.camera.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
         
-        self.camera_container.add_widget(self.camera, index=1)
+        # Display para mostrar frame processado
+        self.display_image.size_hint = (1, 1)
+        
+        # Adicionar ambos (câmera oculta embaixo, display visível em cima)
+        self.camera_container.add_widget(self.camera, index=2)
+        self.camera_container.add_widget(self.display_image, index=1)
         
         # Agendar início com delay para estabilizar
         def start_camera(*_):
             try:
                 self.camera.play = True
                 self._log(f"Câmera iniciada: {resolution[0]}x{resolution[1]}", "OK")
+                self._log("Visualização sincronizada com processamento", "OK")
                 self._update_status("Monitorando pista...")
                 self.permission_btn.opacity = 0
                 self.permission_btn.disabled = True
-                # Aplicar rotação inicial se configurada
-                Clock.schedule_once(lambda *_: self._apply_camera_rotation(), 0.3)
                 self._start_processing()
             except Exception as e:
                 self._log(f"Erro ao iniciar play: {e}", "ALERT")
@@ -658,6 +633,7 @@ class PotholeDetectorLayout(BoxLayout):
         try:
             import numpy as np
             import cv2
+            from kivy.graphics.texture import Texture
             
             # Calcular FPS
             self.frame_count += 1
@@ -697,6 +673,14 @@ class PotholeDetectorLayout(BoxLayout):
             elif self.rotation_mode == 3:  # 270°
                 frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
             # rotation_mode == 0: sem rotação
+            
+            # Atualizar display_image com o frame rotacionado (RGB)
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            frame_rgb = cv2.flip(frame_rgb, 0)  # Flip vertical para Kivy (origem embaixo)
+            h, w = frame_rgb.shape[:2]
+            display_texture = Texture.create(size=(w, h), colorfmt='rgb')
+            display_texture.blit_buffer(frame_rgb.tobytes(), colorfmt='rgb', bufferfmt='ubyte')
+            self.display_image.texture = display_texture
 
             # Detectar TODOS os objetos (sem filtro)
             all_detections = self.detector.detect(frame_bgr, return_all=True)
@@ -719,7 +703,7 @@ class PotholeDetectorLayout(BoxLayout):
 
             # Mostrar todas as detecções visualmente (overlay filtra por show_all)
             if all_detections:
-                self.alert_overlay.show_detections(all_detections, self.camera)
+                self.alert_overlay.show_detections(all_detections, self.display_image)
                 
                 # Alertar apenas para detecções de alta confiança
                 if high_conf_detections:
